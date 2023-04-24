@@ -13,7 +13,9 @@ order by year desc, title asc;
 
 /*
 Заглавията и годините на филмите, в които са играли звезди, родени между
-1.1.1970 и 1.7.1980.
+1.1.1970 и 1.7.1980
+
+
 */
 select distinct title, year, moviestar.name, moviestar.birthdate from movie 
 join starsin on title=movietitle
@@ -107,7 +109,9 @@ order by maker;
 select * from laptop l join product pr on l.model = pr.model
 order by maker;
 
--- Компютрите, които са по-евтини от всеки лаптоп и принтер на същия производител.select code, pc.model, pr.maker from PC pc
+-- Компютрите, които са по-евтини от всеки лаптоп и принтер на същия производител
+
+select code, pc.model, pr.maker from PC pc
 join PRODUCT pr on pc.model = pr.model
 where pc.price < ALL(select price from laptop lp
 				join product on lp.model = product.model
