@@ -1,0 +1,269 @@
+use movies;
+
+/**
+1. Добавете Брус Уилис в базата. Направете
+така, че при добавяне на филм, чието
+заглавие съдържа “save” или “world”, Брус
+Уилис автоматично да бъде добавен като
+актьор, играл във филма.
+
+**/
+
+-- понеже има външен ключ, първо трябва да добавим Брус Уилис в MovieStar:
+insert into moviestar values('Bruce Willis', 'somewhere', 'M', '2020-01-01');
+
+create trigger t1
+on movie
+AFTER INSERT
+AS
+	insert into starsin(movietitle, movieyear, starname)
+	select title, year, 'Bruce Willis' from INSERTED
+	where title like '%save%' or title like '%world%'
+
+insert into movie
+values('Armageddon, save, world', 1998, 120, 'y', 'MGM', 123);
+ 
+select * from starsin;
+		
+drop trigger t1
+
+
+-- 1.2. Да се напише тригер за таблицата MovieExec, който не позволява  
+-- средната стойност на Networth да е по-малка от 500 000 (ако при промени в  
+-- таблицата тази стойност стане по-малка от 500 000, промените да бъдат  
+-- отхвърлени).
+
+create trigger t2
+on movieexec
+AFTER INSERT, UPDATE, DELETE
+as
+if(select avg(networth) from movieexec) < 500000
+	 begin
+        raiserror('Error: Average networth cannot be < 500000', 16, 10);
+        rollback;
+    end;
+
+/**
+3. MS SQL не поддържа ON DELETE SET
+NULL. Да се реализира с тригер за
+външния ключ Movie.producerc#.
+**/
+
+go
+use movies;
+go
+
+create trigger t3
+on movieexec
+instead of delete -- не може after triggger заради FK
+as
+	begin 
+		update movie
+		set PRODUCERC = null
+		where PRODUCERC in (select cert from deleted);
+
+	-- следващата операция е тази, която по принцип щеше да се изпълни и без тригер
+		delete from movieexec
+		where cert in (select cert from deleted);
+	end;
+
+
+-- ако имаме INSTEAD OF INSERT и искаме да изпълним INSERT заявката, която е била предвидена:
+-- INSERT INTO <table>
+-- SELECT * FROM INSERTED;
+ 
+go
+
+-- 1.4.
+-- При добавяне на нов запис в StarsIn, ако новият кортеж указва несъществуващ
+-- филм или актьор, да се добавят липсващите данни в съответната таблица
+-- (неизвестните данни да бъдат NULL):
+
+create trigger t4
+on starsin
+instead of insert
+as
+begin
+	insert into moviestar (name)
+	select distinct starname from inserted
+	where starname not in (select name from moviestar);
+
+	insert into movie(title,year)
+	select distinct movietitle, movieyear from inserted
+	where not exists (select * from movie where title = movietitle and year = movieyear);
+
+	insert into starsin
+	select * from inserted;
+	end;
+
+
+use pc;
+
+/**
+1. Да се направи така, че при изтриване на лаптоп на
+производител D автоматично да се добавя PC със
+същите параметри в таблицата с компютри. Моделът на
+новите компютри да бъде ‘1121’, CD устройството да
+бъде ‘52x’, а кодът - със 100 по-голям от кода на лаптопа.
+
+**/
+create trigger t_pc1
+on laptop
+after delete
+as
+	insert into pc
+	select code + 100, '1121', speed, ram, hd, '52x', price 
+		from deleted
+	where model in (select model from product where maker='D');
+
+drop trigger t_pc1;
+
+-- 2.2. При промяна на цената на някой компютър се уверете, че
+-- няма по-евтин компютър със същата честота на процесора.
+
+create trigger t_pc2
+on pc
+after update
+as
+	if exists(select * from pc p
+				where exists (select * from pc
+								where price < p.price and speed = p.speed)
+						and code in (select i.code from deleted d 
+									join inserted on d.code=i.code
+									where d.price!=i.price))
+				begin
+					raiserror('...',16,10)
+				rollback;
+				end;
+
+	
+-- 2.3. Никой производител на компютри не може да произвежда и принтери;
+	use pc;
+create trigger t
+on product
+after insert, update
+as
+if exists  (select *  
+            from Product p1
+            join Product p2 on p1.maker = p2.maker
+            where p1.type = 'PC' and p2.type = 'Printer')
+begin
+    raiserror('...', 16, 10);
+    rollback;
+end;
+
+-- 2.5. При променяне на данните в таблицата Laptop се уверете, че средната  
+-- цена на лаптопите за всеки производител е поне 2000;
+create trigger t
+on laptop
+after update
+as
+if exists  (select maker
+            from laptop
+            join Product on laptop.model = Product.model
+            group by maker
+            having AVG(price) < 2000)
+begin
+    raiserror('...', 16, 10);
+    rollback;
+end;
+ 
+-- 2.7.
+/**
+7. Да приемем, че цветните матрични принтери (type =
+'Matrix') са забранени за продажба. При добавяне на
+принтери да се игнорират цветните матрични. Ако с една
+заявка се добавят няколко принтера, да се добавят само
+тези, които не са забранени, а другите да се игнорират.
+**/
+create trigger t27
+on printer
+instead of insert  
+AS  
+    insert into printer 
+    select *
+    from inserted
+    where color != 'y' or type != 'Matrix';
+-- или: where not (type = 'Matrix' and color = 'y');
+
+/**
+2. Създайте изглед, който показва за всеки
+клас името му и броя кораби (евентуално
+0). Направете така, че при изтриване на
+ред да се изтрие класът и всички негови
+кораби.
+
+**/
+use ships;
+ 
+create view ShipsCount
+as  
+    select c.class, count(s.name) as ships
+    from CLASSES c
+    left join ships s on c.class = s.CLASS
+    group by c.class;
+ 
+select * from ShipsCount;
+ 
+create trigger t
+on ShipsCount
+instead of DELETE  
+as
+begin
+    delete from SHIPS 
+    where class in (select class from deleted);
+ 
+    delete from CLASSES 
+    where class in (select class from deleted);
+end
+ 
+INSERT INTO Classes
+VALUES ('Test 1', 'bb', 'Bulgaria', 20, 20, 50000),
+('Test 2', 'bc', 'Bulgaria', 18, 21, 45000);
+ 
+insert into SHIPS  
+values ('Test Ship', 'Test 1', 2020);
+ 
+delete from ShipsCount  
+where class = 'Test 1';
+ 
+select * from classes where class like 'Test%';
+
+-- 3.3. Никой клас не може да има повече от два кораба
+create trigger t
+on ships
+after insert, update
+as
+if exists  (select class
+            from ships
+            group by class
+            having COUNT(*) > 2)
+begin
+    raiserror('...', 16, 10);
+    rollback;
+end;
+
+/**
+5. Кораб, който вече е потънал, не може да
+участва в битка, чиято дата е след датата
+на потъването му. Напишете тригери за
+всички таблици, за които е необходимо.
+**/
+-- 3.5. подобно нещо вече направихме за outcomes, но трябва тригер и за battles
+ 
+create trigger t
+on outcomes
+after insert, update
+as
+if exists  (select *
+            from outcomes o1
+            join battles b1 on o1.battle = b1.name
+            join outcomes o2 on o1.ship = o2.ship
+            join battles b2 on o2.battle = b2.name
+            where o1.result = 'sunk'
+            and b1.date < b2.date)
+begin
+    raiserror('...', 16, 10);
+    rollback;
+end;
+-- същият тригер и за battles, но само за update
